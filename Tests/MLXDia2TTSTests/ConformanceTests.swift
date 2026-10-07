@@ -17,13 +17,15 @@ import XCTest
 
 final class ManifestConformanceTests: XCTestCase {
 
-    /// C7/C8 — Apache-2.0 weights (Mimi's CC-BY-4.0 is in the notices) and MIT port code: both allowlisted.
-    func testLicenseIsPermissiveOnBothLayers() {
+    /// C7/C8 (1.49.0) — the bundle declares BOTH weight licences (Dia2 Apache-2.0 + Mimi CC-BY-4.0) and MIT port
+    /// code; the default policy judges each and admits.
+    func testLicenseDeclaresBothWeightSetsAndAdmits() {
         let license = Dia2TTSPackage.manifest.license
         XCTAssertEqual(license.weightLicense, .apache2)
+        XCTAssertEqual(license.additionalWeightLicenses, [.ccBy4])
+        XCTAssertEqual(license.weightLicenses, [.apache2, .ccBy4])
         XCTAssertEqual(license.portCodeLicense, .mit)
-        XCTAssertTrue(SPDXLicense.permissiveAllowlist.contains(license.weightLicense))
-        XCTAssertTrue(SPDXLicense.permissiveAllowlist.contains(.ccBy4))
+        XCTAssertTrue(LicensePolicy.permissiveOnly.evaluate(license).isAdmitted)
     }
 
     /// C-memory — split footprint for the one published tier, at least what the validate lane measured in
@@ -41,10 +43,17 @@ final class ManifestConformanceTests: XCTestCase {
         }
     }
 
-    /// C1 — the package serves `tts` and nothing else; it declares no E12 controls (no emotion / duration lever).
-    func testCapabilitiesAreExactlyTTSWithoutControls() {
+    /// C1 — the package serves `tts` and nothing else. It declares a two-speaker cast (1.49.0) and no E12 lever:
+    /// the descriptor advertises `additionalSpeakers`, never emotion or duration.
+    func testCapabilitiesAreTTSWithATwoSpeakerCast() {
         XCTAssertEqual(Set(Dia2TTSPackage.manifest.capabilities), [.tts])
-        let names = Dia2TTSPackage.manifest.surfaces.flatMap { $0.parameters.map(\.name) }
+        let surface = Dia2TTSPackage.manifest.surfaces.first { $0.capability == .tts }
+        XCTAssertEqual(surface?.ttsControls?.speakerTags, ["[S1]", "[S2]"])
+        XCTAssertEqual(surface?.ttsControls?.maxSpeakers, 2)
+        XCTAssertEqual(surface?.ttsControls?.emotionModes, [])
+        XCTAssertEqual(surface?.ttsControls?.supportsTargetDuration, false)
+        let names = surface?.parameters.map(\.name) ?? []
+        XCTAssertTrue(names.contains("additionalSpeakers"))
         XCTAssertFalse(names.contains("emotion"))
         XCTAssertFalse(names.contains("targetDuration"))
     }
@@ -132,6 +141,48 @@ final class RequestPlaneTests: XCTestCase {
             guard case .notLoaded = error else { return XCTFail("expected notLoaded, got \(error)") }
         } catch {
             XCTFail("expected PackageError, got \(error)")
+        }
+    }
+
+    private func clip() -> Audio { Audio(format: .wav, data: Data([1, 2, 3]), sampleRate: 24_000, channels: 1) }
+
+    /// Speaker 2 (1.49.0): the cast entry wins; `.auto` = a fresh voice; a clip needs its transcript; presets are
+    /// refused; the deprecated metaData keys are read only when no cast entry is given.
+    func testSpeakerTwoFromTheCast() throws {
+        let s1 = TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(clip())), referenceTranscript: "one")
+        let s2 = TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(clip())), referenceTranscript: "two")
+        XCTAssertEqual(try Dia2TTSPackage.speaker2(of: TTSRequest(text: "[S1] a [S2] b", speakers: [s1, s2])),
+                       .prefix(clip(), "two"))
+        XCTAssertEqual(try Dia2TTSPackage.speaker2(of: TTSRequest(text: "x", speakers: [s1, TTSSpeakerVoice()])), .none)
+        XCTAssertEqual(try Dia2TTSPackage.speaker2(of: TTSRequest(text: "x", speakers: [s1])), .none)
+        XCTAssertThrowsError(try Dia2TTSPackage.speaker2(of: TTSRequest(
+            text: "x", speakers: [s1, TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(clip())))])))
+        XCTAssertThrowsError(try Dia2TTSPackage.speaker2(of: TTSRequest(
+            text: "x", speakers: [s1, TTSSpeakerVoice(voice: VoiceSelector(.named("bob")))])))
+        XCTAssertThrowsError(try Dia2TTSPackage.speaker2(of: TTSRequest(text: "x", speakers: [s1, s2, s2])))
+        // Deprecated path: read only when the cast carries no second voice — and the cast wins when both are sent.
+        let legacy: MetaData = ["speaker2Audio": .string(Data([9]).base64EncodedString()), "speaker2Transcript": .string("old")]
+        XCTAssertEqual(try Dia2TTSPackage.speaker2(of: TTSRequest(text: "x", voice: s1.voice, referenceTranscript: "one",
+                                                                  metaData: legacy)),
+                       .prefix(Audio(format: .wav, data: Data([9]), sampleRate: nil, channels: nil), "old"))
+        XCTAssertEqual(try Dia2TTSPackage.speaker2(of: TTSRequest(text: "x", voice: s1.voice, referenceTranscript: "one",
+                                                                  additionalSpeakers: [s2], metaData: legacy)),
+                       .prefix(clip(), "two"))
+    }
+
+    /// The ENGINE refuses a third voice before admission (1.49.0 declaration gate) — no weights are touched.
+    func testEngineRefusesAThirdVoiceBeforeAdmission() async throws {
+        let engine = MLXServeEngine()
+        let store = FileManager.default.temporaryDirectory.appendingPathComponent("dia2-empty-\(UUID().uuidString)")
+        let id = try await engine.register(Dia2TTSPackage.registration,
+                                           configuration: Dia2TTSConfiguration(modelsRootDirectory: store))
+        let v = TTSSpeakerVoice()
+        do {
+            _ = try await engine.run(TTSRequest(text: "[S1] a [S2] b [S3] c", speakers: [v, v, v]), package: id)
+            XCTFail("a three-voice request was admitted")
+        } catch let error as PackageError {
+            guard case .unsupportedRequestFeature(let why) = error else { return XCTFail("\(error)") }
+            XCTAssertTrue(why.contains("additionalSpeakers"), why)
         }
     }
 

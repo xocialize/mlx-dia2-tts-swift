@@ -34,13 +34,25 @@ let response = try await engine.run(TTSRequest(
     metaData: ["seed": .int(7)]))
 ```
 
-**Voices.**
-- `.auto` gives a fresh voice pair, fixed by `metaData.seed`.
-- `.referenceAudio` + `referenceTranscript` is speaker 1's prefix.
-- Speaker 2's prefix rides interim `metaData` keys (`speaker2Audio` as base64 `.wav`, plus `speaker2Transcript`) until the engine contract carries a second voice.
-- Prefix word timings come from `metaData.referenceWords` / `speaker2Words` when the caller has an aligner's output; otherwise they are estimated from the transcript.
-- A single prefix conditions the voice only weakly. Prefix **both** speakers for a scene.
+**Voices** (contract 1.49.0 — a two-speaker cast):
+- `voice` is speaker 1 and `additionalSpeakers[0]` is speaker 2; `TTSRequest(text:speakers:)` builds both.
+  `.auto` = a fresh voice (fixed by `metaData.seed`); `.referenceAudio` + `referenceTranscript` = a voice prefix.
+- The descriptor declares `speakerTags ["[S1]", "[S2]"]`, so the engine refuses a third voice before admission.
+- Prefix word timings come from `metaData.referenceWords` / `speaker2Words` when the caller has an aligner's output;
+  otherwise they are estimated from the transcript (no measurable cost).
+- A single prefix conditions the voice only weakly. Prefix **both** speakers for a scene. Speaker 2's prefix needs
+  speaker 1's.
+- The pre-1.49 `metaData` keys (`speaker2Audio`, `speaker2Transcript`) still work in 0.2.x when `additionalSpeakers`
+  is absent; they go in 0.3.0.
 - No preset voices, no emotion or duration control. Nonverbal tags such as `(laughs)` are accepted but rarely performed.
+
+```swift
+let scene = try await engine.run(TTSRequest(
+    text: "[S1] Did you hear that? [S2] Hear what? It's the wind.",
+    speakers: [TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(clipA)), referenceTranscript: textA),
+               TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(clipB)), referenceTranscript: textB)],
+    metaData: ["seed": .int(7)]))
+```
 
 **Limits.** English only. One take holds ≤ 1 500 frames (120 s); a longer script is refused rather than truncated.
 Output level varies with the seeded voice, so level-normalise downstream.
@@ -57,7 +69,8 @@ waveform within 114–118 dB. See `PORTING-SPEC.md`.
 ## Licences
 
 Port code: MIT. It translates `nari-labs/dia2` (Apache-2.0) and lifts `kyutai-labs/moshi-swift` (MIT). Weights:
-`nari-labs/Dia2-2B` is Apache-2.0; the bundled Mimi codec weights (`kyutai/mimi`) are CC-BY-4.0. See
+`nari-labs/Dia2-2B` is Apache-2.0; the bundled Mimi codec weights (`kyutai/mimi`) are CC-BY-4.0 — the manifest
+declares both (`additionalWeightLicenses`, contract 1.49.0). See
 `THIRD_PARTY_NOTICES.md`.
 
 ## Building and the gates

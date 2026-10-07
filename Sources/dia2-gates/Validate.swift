@@ -46,8 +46,11 @@ func packageConfiguration(_ quant: Quant) -> Dia2TTSConfiguration {
     print(String(format: "  load %.2fs  MLX active %.0f MB  phys %.0f → %.0f MB", loadSecs, resident, phys0, phys1))
 
     let s2 = try cueAudio("ref_s2")
-    let prefixed: MetaData = ["seed": .int(3), "speaker2Audio": .string(s2.data.base64EncodedString()),
-                              "speaker2Transcript": .string(try cueTranscript("ref_s2"))]
+    // Contract 1.49.0: speaker 2 rides the cast (`additionalSpeakers`), not metaData.
+    let cast = [TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(try cueAudio("ref_s1"))),
+                                referenceTranscript: try cueTranscript("ref_s1")),
+                TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(s2)), referenceTranscript: try cueTranscript("ref_s2"))]
+    let prefixed: MetaData = ["seed": .int(3)]
     let scene = "[S1] We should have left an hour ago. [S2] And whose fault is that? You couldn't find your keys. "
         + "[S1] They were in your coat pocket! [S2] Fine. Let's just go. The train won't wait."
     let long = String(repeating: "[S1] Did you hear that? [S2] Hear what? It's the wind. [S1] No, it was a voice. Somebody's down there. "
@@ -55,14 +58,11 @@ func packageConfiguration(_ quant: Quant) -> Dia2TTSConfiguration {
     let runs: [(String, TTSRequest)] = [
         ("line, auto", TTSRequest(text: "[S1] We don't have much time. The bridge goes down at midnight.", metaData: ["seed": .int(0)])),
         ("scene, auto", TTSRequest(text: scene, metaData: ["seed": .int(1)])),
-        ("scene, both prefixed (estimated words)", TTSRequest(text: scene, voice: VoiceSelector(.referenceAudio(try cueAudio("ref_s1"))),
-                                                              referenceTranscript: try cueTranscript("ref_s1"), metaData: prefixed)),
-        ("scene again (cached prefix plan)", TTSRequest(text: scene, voice: VoiceSelector(.referenceAudio(try cueAudio("ref_s1"))),
-                                                        referenceTranscript: try cueTranscript("ref_s1"), metaData: prefixed)),
+        ("scene, both prefixed (estimated words)", TTSRequest(text: scene, speakers: cast, metaData: prefixed)),
+        ("scene again (cached prefix plan)", TTSRequest(text: scene, speakers: cast, metaData: prefixed)),
         ("long scene ×3, auto", TTSRequest(text: long, metaData: ["seed": .int(2)])),
         ("near-max scene ×10, both prefixed", TTSRequest(text: String(repeating: scene + " ", count: 10),
-                                                         voice: VoiceSelector(.referenceAudio(try cueAudio("ref_s1"))),
-                                                         referenceTranscript: try cueTranscript("ref_s1"), metaData: prefixed)),
+                                                         speakers: cast, metaData: prefixed)),
     ]
     var worstPeak = 0.0, worstPhys = 0.0
     for (i, (label, request)) in runs.enumerated() {
@@ -84,7 +84,8 @@ func packageConfiguration(_ quant: Quant) -> Dia2TTSConfiguration {
     let refusals: [(String, TTSRequest)] = [
         ("voice.named", TTSRequest(text: "[S1] hi", voice: VoiceSelector(.named("alice")))),
         ("referenceAudio without transcript", TTSRequest(text: "[S1] hi", voice: VoiceSelector(.referenceAudio(try cueAudio("ref_s1"))))),
-        ("speaker2Audio without speaker 1", TTSRequest(text: "[S1] hi", metaData: ["speaker2Audio": .string(s2.data.base64EncodedString())])),
+        ("speaker 2's prefix without speaker 1's", TTSRequest(text: "[S1] hi", speakers: [TTSSpeakerVoice(), cast[1]])),
+        ("a third voice", TTSRequest(text: "[S1] hi", speakers: [cast[0], cast[1], cast[1]])),
         ("empty text", TTSRequest(text: "   ")),
     ]
     for (label, request) in refusals {
@@ -113,9 +114,10 @@ func packageConfiguration(_ quant: Quant) -> Dia2TTSConfiguration {
     let s2 = try cueAudio("ref_s2")
     let request = TTSRequest(
         text: String(repeating: "[S1] Did you hear that? [S2] Hear what? It's the wind. [S1] No, it was a voice. ", count: 3),
-        voice: VoiceSelector(.referenceAudio(try cueAudio("ref_s1"))), referenceTranscript: try cueTranscript("ref_s1"),
-        metaData: ["seed": .int(1), "speaker2Audio": .string(s2.data.base64EncodedString()),
-                   "speaker2Transcript": .string(try cueTranscript("ref_s2"))])
+        speakers: [TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(try cueAudio("ref_s1"))),
+                                   referenceTranscript: try cueTranscript("ref_s1")),
+                   TTSSpeakerVoice(voice: VoiceSelector(.referenceAudio(s2)), referenceTranscript: try cueTranscript("ref_s2"))],
+        metaData: ["seed": .int(1)])
     for delay in [0.3, 2.5, 6.0] {   // lands in the prefix encode / warmup, early frames, late frames
         let t0 = Date()
         let task = Task { @InferenceActor in try await package.run(request) }

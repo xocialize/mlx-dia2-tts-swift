@@ -58,6 +58,16 @@ ported either; they are upstream performance paths with identical numerics.
   Whole-take decode is linear in memory (~0.24 GB per second of audio). The streamed one is flat and matches it to
   2.6e-6.
 
+## Engine contract (0.2.0)
+
+- **Cast.** Contract 1.49.0: `voice` = speaker 1; `additionalSpeakers[0]` = speaker 2 (`.auto` = fresh,
+  `.referenceAudio` + transcript = prefix). Declared `TTSControls(speakerTags: ["[S1]", "[S2]"])`. The package
+  refuses a third voice itself as well, for direct callers. The `metaData.speaker2Audio` / `speaker2Transcript` path
+  is deprecated and read only when the cast has no second voice.
+- **Licences.** `LicenseDeclaration(weightLicense: .apache2, additionalWeightLicenses: [.ccBy4],
+  portCodeLicense: .mit)`.
+- **Engine floor:** 0.64.0.
+
 ## Gates (`swift run -c release dia2-gates …`, run from the package dir)
 
 Goldens: `Tools/oracle-capture/capture_goldens_dia2.py` over the upstream runtime (fp32, CPU, seed 0 / 1).
@@ -85,8 +95,12 @@ Live lanes (GPU; results in `MEASUREMENTS.md`):
 - `--render-jobs FILE [--system NAME] [--estimate-words]`: E23's job list into the layout `harness/score_dia.py`
   scores.
 
-Offline: `swift test` runs 16 conformance and unit tests (manifest, MAT-1..5, CAN-1..3, request plane, state-machine
-trace, word-timing estimate, CFG filter).
+Offline: `swift test` runs 18 conformance and unit tests:
+- manifest (both weight licences, the `speakerTags` cast);
+- MAT-1..5 and CAN-1..3;
+- the request plane (speaker 2 from the cast or the deprecated keys, and the engine refusing a third voice before
+  admission);
+- the state-machine trace, the word-timing estimate and the CFG filter.
 
 ## Lessons this port paid for
 

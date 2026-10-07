@@ -76,3 +76,14 @@ encode / prefill), 2.5 s and 6.0 s. The same seeded request renders sample-ident
 
 Output level varies with the seeded voice (peak −1 to −17 dBFS on the validate lines; all transcribe correctly), so
 a consumer should level-normalise.
+
+### 0.2.0 — the canonical cast (contract 1.49.0, 2026-10-07)
+
+Speaker 2 moved from `metaData` to `TTSRequest.additionalSpeakers` (AB-A-0136):
+- **Same output:** the validate lane's prefixed scene (seed 3) renders the same 10.80 s at −20.0 dBFS as the
+  `metaData` path did.
+- **Memory unchanged:** activation ≤ 1.23 GB, phys max 6.39 GB.
+- **New refusals:** speaker 2's prefix without speaker 1's, and a third voice. The engine refuses the third voice
+  before admission too (`swift test` 18/18).
+- **Not a speed measurement:** this pass ran beside another session's GPU tests, so its wall times (RTF 2.8–14) are
+  void. Speed stays the quiet-box 0.53–0.60 above.

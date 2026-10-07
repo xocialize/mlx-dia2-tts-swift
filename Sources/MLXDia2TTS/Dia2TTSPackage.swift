@@ -17,8 +17,11 @@ import MLXToolKit
 /// - `.referenceAudio(clip)` + `referenceTranscript` — speaker 1's prefix. Required: the transcript (the prefix's
 ///   words are fed to the script stream). Word timings come from `metaData.referenceWords` when the caller has them
 ///   (an aligner's output), else they are estimated from the transcript (`Dia2WordTiming`).
-/// - Speaker 2's prefix (needs speaker 1's): INTERIM `metaData` keys until the contract carries a second voice —
-///   `speaker2Audio` (base64 `.wav`), `speaker2Transcript`, optional `speaker2Words`.
+/// - Speaker 2 (contract 1.49.0, AB-A-0136): `additionalSpeakers[0]` — `.referenceAudio` + its `referenceTranscript`
+///   for a prefix, `.auto` for a fresh voice. Its prefix needs speaker 1's. The descriptor declares
+///   `speakerTags ["[S1]", "[S2]"]`, so the engine refuses a third voice before admission. Word timings stay on
+///   `metaData.speaker2Words`. The pre-1.49 `metaData` keys (`speaker2Audio` base64 `.wav` + `speaker2Transcript`)
+///   still work for this release when `additionalSpeakers` is absent; they go in 0.3.0.
 /// - `.named` — rejected: Dia2 has no preset voices.
 /// A single prefix conditions Dia2 only weakly (E23: 0.44 cosine to the reference); with BOTH speakers prefixed it
 /// holds (0.80 — the shape for scenes and for speaking against the other party's audio). For single-voice cloning
@@ -29,7 +32,8 @@ import MLXToolKit
 /// - `cfgScale` (double, 2.0), `textTemperature` (double, 0.6), `audioTemperature` (double, 0.8), `topK` (int, 50):
 ///   upstream's GenerationConfig.
 /// - `referenceWords` / `speaker2Words` (array of {text, start, end} seconds): prefix word timings.
-/// - `speaker2Audio` (string, base64 .wav), `speaker2Transcript` (string): speaker 2's prefix (interim).
+/// - `speaker2Audio` (string, base64 .wav), `speaker2Transcript` (string): DEPRECATED — speaker 2 before contract
+///   1.49.0; read only when `additionalSpeakers` is absent.
 /// - `includePrefixAudio` (bool, false): keep the prefix clips at the head of the output.
 ///
 /// One take covers at most 1 500 frames (120 s); a script that does not finish within it is refused, not truncated.
@@ -52,7 +56,9 @@ public final class Dia2TTSPackage: ModelPackage {
             // C7: nari-labs/Dia2-2B is Apache-2.0 (the transformer, depformer and tokenizer files); the bundled Mimi
             // codec weights are kyutai/mimi, CC-BY-4.0 (attribution in THIRD_PARTY_NOTICES). C8: port code MIT, the
             // lifted moshi-swift Mimi MIT (Kyutai).
-            license: LicenseDeclaration(weightLicense: .apache2, portCodeLicense: .mit),
+            // 1.49.0: a two-licence bundle declares both (AB-A-0136 item 3).
+            license: LicenseDeclaration(weightLicense: .apache2, additionalWeightLicenses: [.ccBy4],
+                                        portCodeLicense: .mit),
             provenance: Provenance(sourceRepo: "nari-labs/Dia2-2B", revision: "7abae125471a73b0fc6b9d413cb15f4ae1e771d8", tier: 1),
             requirements: RequirementsManifest(
                 footprints: [
@@ -68,16 +74,20 @@ public final class Dia2TTSPackage: ModelPackage {
                     name: "dia2-2b",
                     summary: "Dia2-2B (Nari Labs) two-speaker dialogue TTS (.wav, 24 kHz mono, English): a script with "
                         + "[S1] / [S2] turns renders as ONE take with natural turn-taking — background conversations, "
-                        + "generated dialogue. voice.auto = a fresh voice pair per seed; voice.referenceAudio + "
-                        + "referenceTranscript = speaker 1's voice prefix (weak alone; strong with speaker 2's prefix "
-                        + "too, metaData speaker2Audio / speaker2Transcript). Nonverbal tags like (laughs) (sighs) are "
-                        + "accepted but rarely performed. ≤ 120 s per take. metaData: seed / cfgScale / "
-                        + "textTemperature / audioTemperature / topK / referenceWords / speaker2Words / includePrefixAudio.",
-                    modes: [.expressive]
+                        + "generated dialogue. voice = speaker 1, additionalSpeakers[0] = speaker 2: .auto = a fresh "
+                        + "voice (seeded), .referenceAudio + referenceTranscript = a voice prefix (weak alone; prefix "
+                        + "both for a stable pair). Nonverbal tags like (laughs) (sighs) are accepted but rarely "
+                        + "performed. ≤ 120 s per take. metaData: seed / cfgScale / textTemperature / "
+                        + "audioTemperature / topK / referenceWords / speaker2Words / includePrefixAudio.",
+                    modes: [.expressive],
+                    controls: TTSControls(speakerTags: Self.speakerTags)
                 )
             ]
         )
     }
+
+    /// The script's turn tags, in speaker order — the 1.49.0 declaration (`maxSpeakers` = 2).
+    public nonisolated static let speakerTags = ["[S1]", "[S2]"]
 
     private let configuration: Configuration
     private var model: Dia2Model?
@@ -158,13 +168,55 @@ public final class Dia2TTSPackage: ModelPackage {
     }
 
     /// The voice prefix the request asks for (nil = none).
+    /// Speaker 2's prefix source: the canonical cast entry (1.49.0), else the deprecated metaData keys.
+    enum Speaker2: Equatable {
+        case none                                   // no second voice given — a fresh one from the seed
+        case prefix(Audio, String)                  // clip + transcript
+    }
+
+    nonisolated static func speaker2(of request: TTSRequest) throws -> Speaker2 {
+        let meta = request.metaData
+        if let extra = request.additionalSpeakers, !extra.isEmpty {
+            // The engine refuses > maxSpeakers before admission; a direct caller (gates, tests) meets it here.
+            guard extra.count < speakerTags.count else {
+                throw PackageError.unsupportedRequestFeature(
+                    "\(extra.count + 1) voices — Dia2 renders two speakers ([S1], [S2])")
+            }
+            let s2 = extra[0]
+            switch s2.voice.selection {
+            case .auto:
+                return .none
+            case .named(let id):
+                throw PackageError.unsupportedRequestFeature(
+                    "additionalSpeakers[0] = .named(\"\(id)\") — Dia2 has no preset voices; use .auto or .referenceAudio")
+            case .referenceAudio(let clip):
+                guard let t = s2.referenceTranscript?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else {
+                    throw PackageError.unsupportedRequestFeature(
+                        "additionalSpeakers[0] needs its referenceTranscript — Dia2 reads the prefix's words")
+                }
+                return .prefix(clip, t)
+            }
+        }
+        // Pre-1.49 callers (deprecated; removed in 0.3.0).
+        guard case .string(let b64)? = meta["speaker2Audio"] else { return .none }
+        guard let data = Data(base64Encoded: b64) else {
+            throw PackageError.unsupportedRequestFeature("metaData.speaker2Audio is not base64")
+        }
+        guard case .string(let t)? = meta["speaker2Transcript"], !t.trimmingCharacters(in: .whitespaces).isEmpty else {
+            throw PackageError.unsupportedRequestFeature("metaData.speaker2Audio needs metaData.speaker2Transcript")
+        }
+        return .prefix(Audio(format: .wav, data: data, sampleRate: nil, channels: nil), t)
+    }
+
+    /// The voice prefix the request asks for (nil = none).
     func prefixPlan(model: Dia2Model, request: TTSRequest) throws -> Dia2PrefixPlan? {
         let meta = request.metaData
+        let s2 = try Self.speaker2(of: request)
         switch request.voice.selection {
         case .auto:
-            if meta["speaker2Audio"] != nil {
+            if case .prefix = s2 {
                 throw PackageError.unsupportedRequestFeature(
-                    "metaData.speaker2Audio needs speaker 1's prefix too (voice.referenceAudio + referenceTranscript)")
+                    "speaker 2's voice prefix needs speaker 1's too (voice.referenceAudio + referenceTranscript)")
             }
             return nil
         case .named(let id):
@@ -176,21 +228,14 @@ public final class Dia2TTSPackage: ModelPackage {
                 throw PackageError.unsupportedRequestFeature(
                     "voice.referenceAudio needs referenceTranscript — Dia2 reads the prefix's words on its script stream")
             }
-            var s2: (Audio, String, MetaValue?)? = nil
-            if case .string(let b64)? = meta["speaker2Audio"] {
-                guard let data = Data(base64Encoded: b64) else {
-                    throw PackageError.unsupportedRequestFeature("metaData.speaker2Audio is not base64")
-                }
-                guard case .string(let t)? = meta["speaker2Transcript"], !t.trimmingCharacters(in: .whitespaces).isEmpty else {
-                    throw PackageError.unsupportedRequestFeature("metaData.speaker2Audio needs metaData.speaker2Transcript")
-                }
-                s2 = (Audio(format: .wav, data: data, sampleRate: nil, channels: nil), t, meta["speaker2Words"])
-            }
+            var second: (Audio, String)? = nil
+            if case .prefix(let a, let t) = s2 { second = (a, t) }
             let key = [Dia2AudioIO.digest(clip.data), transcript, String(describing: meta["referenceWords"]),
-                       s2.map { Dia2AudioIO.digest($0.0.data) + $0.1 + String(describing: $0.2) } ?? "-"].joined(separator: "|")
+                       second.map { Dia2AudioIO.digest($0.0.data) + $0.1 + String(describing: meta["speaker2Words"]) } ?? "-"]
+                .joined(separator: "|")
             if let cachedPlan, cachedPlan.key == key { return cachedPlan.plan }
             let v1 = try voice(clip, transcript: transcript, words: meta["referenceWords"], field: "referenceWords")
-            let v2 = try s2.map { try voice($0.0, transcript: $0.1, words: $0.2, field: "speaker2Words") }
+            let v2 = try second.map { try voice($0.0, transcript: $0.1, words: meta["speaker2Words"], field: "speaker2Words") }
             let plan = model.prefixPlan(s1: v1, s2: v2)
             cachedPlan = (key, plan)
             return plan
