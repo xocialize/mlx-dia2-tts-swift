@@ -9,14 +9,16 @@ import MLXToolKit
 /// depformer, upstream keys), `mimi.safetensors` (re-keyed onto the lifted moshi-swift Mimi), `config.json` and the
 /// tokenizer files.
 ///
-/// `quant` is `.bf16` as-shipped (activations bf16; norms, logits and Mimi float32 — upstream's CUDA precision);
-/// `.fp32` is the parity-gate tier.
+/// `quant` is `.bf16` as-shipped — the one published tier, `mlx-community/Dia2-2B-bf16` (activations bf16; norms,
+/// logits and Mimi float32 — upstream's CUDA precision). `.fp32` is the parity-gate tier and is NOT published, as
+/// with the fleet's other ports: it loads only from an explicit `modelDirectory` holding a local
+/// `convert.py --dtype float32` conversion.
 public struct Dia2TTSConfiguration: PackageConfiguration, ModelStorable, QuantConfigured {
-    /// The converted checkpoint repo (bf16 tier; the fp32 tier is `repo` with `-fp32`).
+    /// The converted checkpoint repo (the bf16 tier).
     public var repo: String
     /// Pinned revision; nil = main.
     public var revision: String?
-    /// Compute tier: `.bf16` as-shipped, `.fp32` for parity work.
+    /// Compute tier: `.bf16` as-shipped, `.fp32` for parity work (explicit `modelDirectory` only).
     public var quant: Quant
     /// Explicit checkpoint directory (dev escape hatch — never touches the network).
     public var modelDirectory: URL?
@@ -37,7 +39,8 @@ public struct Dia2TTSConfiguration: PackageConfiguration, ModelStorable, QuantCo
         self.modelsRootDirectory = modelsRootDirectory
     }
 
-    /// The repo for the configured tier: the fp32 tier lives beside the bf16 one.
+    /// The repo backing the configured tier. Only bf16 is published; an fp32 configuration without an explicit
+    /// directory names the store slot a local fp32 conversion would occupy, which no download can fill.
     public var tierRepo: String {
         quant == .fp32 ? repo.replacingOccurrences(of: "-bf16", with: "-fp32") : repo
     }

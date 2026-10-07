@@ -37,14 +37,13 @@ import MLXToolKit
 public final class Dia2TTSPackage: ModelPackage {
     public typealias Configuration = Dia2TTSConfiguration
 
-    /// Split footprints, MEASURED through this package (`dia2-gates --validate`, MLX pool at the engine's 2 GiB cap,
-    /// 2026-10-06; MEASUREMENTS.md): bf16 resident 4.03 GB (MLX active after load), activation ≤ 1.21 GB over takes of
-    /// 3–101 s, both speakers prefixed; fp32 7.69 GB + ≤ 1.71 GB. Activation is flat in take length because Mimi's
-    /// SEANet decoder streams (`decodeChunked`); the decoder's KV cache is preallocated for the full 1 500 frames.
+    /// Split footprint of the published bf16 tier, MEASURED through this package (`dia2-gates --validate`, MLX pool at
+    /// the engine's 2 GiB cap, 2026-10-06; MEASUREMENTS.md): resident 4.03 GB (MLX active after load), activation
+    /// ≤ 1.21 GB over takes of 3–101 s, both speakers prefixed. Activation is flat in take length because Mimi's SEANet
+    /// decoder streams (`decodeChunked`); the decoder's KV cache is preallocated for the full 1 500 frames. (The
+    /// unpublished fp32 parity tier measured 7.69 GB + ≤ 1.71 GB; it is not a declared, engine-selectable tier.)
     nonisolated static let bf16ResidentBytes: UInt64 = 4_300_000_000
-    nonisolated static let fp32ResidentBytes: UInt64 = 8_000_000_000
     nonisolated static let bf16PeakActivationBytes: UInt64 = 1_500_000_000
-    nonisolated static let fp32PeakActivationBytes: UInt64 = 2_000_000_000
 
     public nonisolated static var manifest: PackageManifest {
         PackageManifest(
@@ -52,11 +51,10 @@ public final class Dia2TTSPackage: ModelPackage {
             // codec weights are kyutai/mimi, CC-BY-4.0 (attribution in THIRD_PARTY_NOTICES). C8: port code MIT, the
             // lifted moshi-swift Mimi MIT (Kyutai).
             license: LicenseDeclaration(weightLicense: .apache2, portCodeLicense: .mit),
-            provenance: Provenance(sourceRepo: "nari-labs/Dia2-2B", revision: "main", tier: 1),
+            provenance: Provenance(sourceRepo: "nari-labs/Dia2-2B", revision: "7abae125471a73b0fc6b9d413cb15f4ae1e771d8", tier: 1),
             requirements: RequirementsManifest(
                 footprints: [
                     QuantFootprint(quant: .bf16, residentBytes: bf16ResidentBytes, peakActivationBytes: bf16PeakActivationBytes),
-                    QuantFootprint(quant: .fp32, residentBytes: fp32ResidentBytes, peakActivationBytes: fp32PeakActivationBytes),
                 ],
                 requiredBackends: [.metalGPU],
                 os: OSRequirement(minMacOS: SemanticVersion(major: 26, minor: 0, patch: 0)),

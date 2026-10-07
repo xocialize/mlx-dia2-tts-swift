@@ -2,7 +2,9 @@
 
 [Dia2](https://github.com/nari-labs/dia2) (Nari Labs, Apache-2.0) on Apple silicon with
 [MLX-Swift](https://github.com/ml-explore/mlx-swift), as an [MLXEngine](https://github.com/xocialize/mlx-engine-swift)
-`tts` package. Checkpoint: [`nari-labs/Dia2-2B`](https://huggingface.co/nari-labs/Dia2-2B).
+`tts` package. Checkpoint: [`nari-labs/Dia2-2B`](https://huggingface.co/nari-labs/Dia2-2B), converted to
+[`mlx-community/Dia2-2B-bf16`](https://huggingface.co/mlx-community/Dia2-2B-bf16) (the package's default; the
+engine materializes it).
 
 Dia2 is a dialogue TTS. A script with `[S1]` / `[S2]` turns renders as **one take** in which two speakers trade
 lines with conversational turn gaps: background conversations under a dubbed scene, generated dialogue, or one side
@@ -56,3 +58,14 @@ waveform within 114–118 dB. See `PORTING-SPEC.md`.
 Port code: MIT. It translates `nari-labs/dia2` (Apache-2.0) and lifts `kyutai-labs/moshi-swift` (MIT). Weights:
 `nari-labs/Dia2-2B` is Apache-2.0; the bundled Mimi codec weights (`kyutai/mimi`) are CC-BY-4.0. See
 `THIRD_PARTY_NOTICES.md`.
+
+## Building and the gates
+
+```bash
+swift build -c release
+swift test
+```
+
+The parity gates (`dia2-gates --gm --g1 --g2 --g3 --g5`) need an fp32 conversion
+(`Tools/oracle-capture/convert.py OUT --dtype float32`) and goldens from the upstream runtime
+(`Tools/oracle-capture/capture_goldens_dia2.py`). Point them at both with `DIA_EVAL` / `--weights` / `--goldens`.

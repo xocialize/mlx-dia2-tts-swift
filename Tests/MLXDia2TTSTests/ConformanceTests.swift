@@ -26,17 +26,13 @@ final class ManifestConformanceTests: XCTestCase {
         XCTAssertTrue(SPDXLicense.permissiveAllowlist.contains(.ccBy4))
     }
 
-    /// C-memory — split footprint for every selectable tier; the bf16 floor is at least the weight bytes
-    /// (3.84 GB bf16 transformer + depformer + 0.38 GB fp32 Mimi).
-    func testFootprintIsSplitPerTier() {
+    /// C-memory — split footprint for the one published tier; the floor is at least the weight bytes (3.84 GB bf16
+    /// transformer + depformer + 0.38 GB fp32 Mimi). The fp32 parity tier is unpublished and undeclared.
+    func testFootprintIsTheMeasuredBf16Tier() {
         let footprints = Dia2TTSPackage.manifest.requirements.footprints
-        for quant in [Quant.bf16, .fp32] {
-            guard let f = footprints.first(where: { $0.quant == quant }) else { return XCTFail("no \(quant) footprint") }
-            XCTAssertGreaterThan(f.residentBytes, 0)
-            XCTAssertGreaterThan(f.peakActivationBytes, 0)
-        }
-        XCTAssertGreaterThanOrEqual(footprints.first { $0.quant == .bf16 }!.residentBytes, 4_220_000_000)
-        XCTAssertGreaterThan(footprints.first { $0.quant == .fp32 }!.residentBytes, footprints.first { $0.quant == .bf16 }!.residentBytes)
+        XCTAssertEqual(footprints.map(\.quant), [.bf16])
+        XCTAssertGreaterThanOrEqual(footprints[0].residentBytes, 4_220_000_000)
+        XCTAssertGreaterThan(footprints[0].peakActivationBytes, 1_210_000_000)
     }
 
     func testSpecialtiesAreRegistered() {
@@ -60,7 +56,8 @@ final class ManifestConformanceTests: XCTestCase {
 
 final class MaterializationConformanceTests: XCTestCase {
 
-    /// MAT-1..5 per tier: a fresh (dir-less) configuration reports its one source missing; explicit paths satisfy.
+    /// MAT-1..5: a fresh (dir-less) configuration reports its one source missing; an explicit path satisfies — for
+    /// the published bf16 tier, and for the fp32 parity tier, which only ever loads from an explicit directory.
     func testMaterializationGatePerTier() throws {
         for quant in [Quant.bf16, .fp32] {
             let satisfied = try satisfiedConfiguration(quant: quant)
@@ -72,10 +69,10 @@ final class MaterializationConformanceTests: XCTestCase {
         }
     }
 
-    /// The fp32 tier materializes its own repo; bf16 the configured one.
-    func testTierRepos() {
-        XCTAssertEqual(Dia2TTSConfiguration(quant: .bf16).weightSources.map(\.repo), ["mlx-community/Dia2-2B-bf16"])
-        XCTAssertEqual(Dia2TTSConfiguration(quant: .fp32).weightSources.map(\.repo), ["mlx-community/Dia2-2B-fp32"])
+    /// The shipping tier materializes the mlx-community repo named by fleet convention (<upstream name>-<tier>).
+    func testPublishedRepo() {
+        XCTAssertEqual(Dia2TTSConfiguration().weightSources.map(\.repo), ["mlx-community/Dia2-2B-bf16"])
+        XCTAssertEqual(Dia2TTSConfiguration().quant, .bf16)
     }
 
     /// The declared file list covers everything `Dia2Model.load` opens (config, both safetensors, the tokenizer).
