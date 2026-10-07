@@ -37,13 +37,15 @@ import MLXToolKit
 public final class Dia2TTSPackage: ModelPackage {
     public typealias Configuration = Dia2TTSConfiguration
 
-    /// Split footprint of the published bf16 tier, MEASURED through this package (`dia2-gates --validate`, MLX pool at
-    /// the engine's 2 GiB cap, 2026-10-06; MEASUREMENTS.md): resident 4.03 GB (MLX active after load), activation
-    /// ≤ 1.21 GB over takes of 3–101 s, both speakers prefixed. Activation is flat in take length because Mimi's SEANet
-    /// decoder streams (`decodeChunked`); the decoder's KV cache is preallocated for the full 1 500 frames. (The
-    /// unpublished fp32 parity tier measured 7.69 GB + ≤ 1.71 GB; it is not a declared, engine-selectable tier.)
-    nonisolated static let bf16ResidentBytes: UInt64 = 4_300_000_000
-    nonisolated static let bf16PeakActivationBytes: UInt64 = 1_500_000_000
+    /// Split footprint of the published bf16 tier, MEASURED as phys_footprint through this package (`dia2-gates
+    /// --validate`, quiet box, MLX pool at the engine's 2 GiB automatic cap, 2026-10-06; MEASUREMENTS.md), pool-inclusive
+    /// as the fleet declares (AB-L-0113 / AB-L-0155): phys 4.41 GB after load; 7.01 GB at the highest reading over takes
+    /// of 3–101 s, both speakers prefixed → 2.60 GB activation. Of that, Dia2's own MLX working set is ≤ 1.21 GB, flat
+    /// in take length (Mimi's SEANet decoder streams — `decodeChunked`; the decoder's KV cache is preallocated for the
+    /// full 1 500 frames); the rest is the engine's recycling pool. (The unpublished fp32 parity tier measured phys
+    /// 8.25 GB + 2.71 GB; it is not a declared, engine-selectable tier.)
+    nonisolated static let bf16ResidentBytes: UInt64 = 4_500_000_000
+    nonisolated static let bf16PeakActivationBytes: UInt64 = 3_000_000_000
 
     public nonisolated static var manifest: PackageManifest {
         PackageManifest(

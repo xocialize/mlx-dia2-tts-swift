@@ -60,8 +60,14 @@ Quiet box (Edge closed), GPU, MLX pool at the engine's shipping cap (2 GiB; AB-L
   at 3 / 11 / 23 s, i.e. ~30 GB at the 120 s cap. Bark found the same with EnCodec (E22).
 - Prefixes cost their Mimi encode once; the plan is cached per (clips, transcripts, timings). The batched prefill
   replaces upstream's frame-by-frame warmup and is gated (g5).
-- Declared (`Dia2TTSPackage`): bf16 4.30 GB + 1.50 GB, the one published tier (`mlx-community/Dia2-2B-bf16`).
-  fp32 is the unpublished parity tier (a local `convert.py --dtype float32`), measured here but not declared.
+- **Declared (`Dia2TTSPackage`, v0.1.1): bf16 4.50 GB resident + 3.00 GB activation, phys and pool-inclusive** —
+  the fleet's convention (AB-L-0113 / AB-L-0155):
+  - phys was 4 208 MB (4.41 GB) after load and 6 681 MB (7.01 GB) at the highest reading, so activation is 2.60 GB;
+  - Dia2's own MLX working set is ≤ 1.21 GB of that, and the rest is the engine's 2 GiB recycling pool;
+  - v0.1.0 had declared MLX-active numbers (4.30 + 1.50 GB), below the phys floor.
+
+  bf16 is the one published tier (`mlx-community/Dia2-2B-bf16`). fp32 is the unpublished parity tier (a local
+  `convert.py --dtype float32`): phys 7 870 → 10 456 MB, i.e. 8.25 + 2.71 GB, measured but not declared.
 - Render-lane timings from the E23 job runs (RTF 0.9–1.5) are NOT speed numbers: those ran beside a browser at
   100 % CPU and a compile.
 

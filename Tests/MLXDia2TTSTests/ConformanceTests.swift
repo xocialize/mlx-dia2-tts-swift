@@ -26,13 +26,13 @@ final class ManifestConformanceTests: XCTestCase {
         XCTAssertTrue(SPDXLicense.permissiveAllowlist.contains(.ccBy4))
     }
 
-    /// C-memory — split footprint for the one published tier; the floor is at least the weight bytes (3.84 GB bf16
-    /// transformer + depformer + 0.38 GB fp32 Mimi). The fp32 parity tier is unpublished and undeclared.
+    /// C-memory — split footprint for the one published tier, at least what the validate lane measured in
+    /// phys_footprint (pool-inclusive). The fp32 parity tier is unpublished and undeclared.
     func testFootprintIsTheMeasuredBf16Tier() {
         let footprints = Dia2TTSPackage.manifest.requirements.footprints
         XCTAssertEqual(footprints.map(\.quant), [.bf16])
-        XCTAssertGreaterThanOrEqual(footprints[0].residentBytes, 4_220_000_000)
-        XCTAssertGreaterThan(footprints[0].peakActivationBytes, 1_210_000_000)
+        XCTAssertGreaterThanOrEqual(footprints[0].residentBytes, 4_410_000_000)        // measured phys after load
+        XCTAssertGreaterThanOrEqual(footprints[0].peakActivationBytes, 2_600_000_000)  // measured phys peak − resident
     }
 
     func testSpecialtiesAreRegistered() {

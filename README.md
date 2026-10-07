@@ -45,8 +45,9 @@ let response = try await engine.run(TTSRequest(
 **Limits.** English only. One take holds ≤ 1 500 frames (120 s); a longer script is refused rather than truncated.
 Output level varies with the seeded voice, so level-normalise downstream.
 
-**Footprint (measured, bf16).** 4.0 GB resident, ≤ 1.2 GB activation flat in take length, ≈ 1.8× realtime on
-an M5 Max. On E23's cues the bf16 tier reproduces upstream's scene, line and cloning numbers within sampling noise
+**Footprint (measured, bf16).** 4.5 GB resident + 3.0 GB activation as declared (phys_footprint, including the
+engine's 2 GiB pool). Dia2's own working set is ≤ 1.2 GB, flat in take length. It runs at ≈ 1.8× realtime on an
+M5 Max. On E23's cues the bf16 tier reproduces upstream's scene, line and cloning numbers within sampling noise
 (`MEASUREMENTS.md`).
 
 **Parity.** Tokenizer id-exact. Decoder within 1.1e-5 of the PyTorch reference. Every one of 2 673 + 1 584 sampled
